@@ -4,7 +4,7 @@ module Main where
 
 import Language.Haskell.TH
 import Lib
-import RecordSplices
+import RecordSplicer
 
 main :: IO ()
 main = someFunc

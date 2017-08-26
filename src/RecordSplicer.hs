@@ -1,5 +1,5 @@
 {-# LANGUAGE RecordWildCards #-}
-module RecordSplices (SpliceArgs(..), createRecordSplice) where
+module RecordSplicer (SpliceArgs(..), createRecordSplice) where
 
 import Control.Monad
 import Data.Char (toUpper, toLower)
