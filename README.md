@@ -64,12 +64,12 @@ tagToTagNew t = TagNew
   }
   
 tagNewToTag :: TagNew -> TagNewDelta -> Tag
-tagNewToTag t d = Tag
+tagNewToTag t d = TagPoly
   {
     _tagId = (_tagnId d)
   , _tagClientId = (_tagnClientId t)
   , _tagName = (_tagnName t)
-  , _tagColourCode = (_tagnName t)
+  , _tagColourCode = (_tagnColourCode t)
   , _tagCreatedAt = (_tagnCreatedAt d)
   , _tagUpdatedAt = (_tagUpdatedAt d)
   }
