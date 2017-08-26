@@ -3,7 +3,7 @@ Utility TH functions to create sub-record-types from large record-types and func
 
 # How to use
 
-```
+```Haskell
 data TagPoly id clientId name colourCode createdAt updatedAt = TagPoly {_tagId :: id, _tagClientId :: clientId, _tagName :: name, _tagColourCode :: colourCode, _tagCreatedAt :: createdAt, _tagUpdatedAt :: updatedAt} deriving (Eq, Show, Generic)
 type Tag = TagPoly (TagId) (Integer) (Text) (Text) (UTCTime) (UTCTime)
 
@@ -33,9 +33,9 @@ createRecordSplice SpliceArgs
   }
 ```
 
-This will generate the following code (not the actualy code, but the equivalent code) via TH:
+This will generate the following code (not the actual code, but the equivalent code) via TH:
 
-```
+```Haskell
 data TagNew = TagNew
   {
     _tagnClientId :: Integer
