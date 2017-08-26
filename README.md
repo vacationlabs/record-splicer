@@ -48,7 +48,7 @@ data TagNew = TagNew
 -- the outer splice does not work. Some stupid TH restrictions.
 makeLensesWith abbreviatedFields ''TagNew
 
-data TagNewDelta = TagNewDela
+data TagNewDelta = TagNewDelta
   {
      _tagnId :: TagId
    , _tagnCreatedAt :: UTCTime
@@ -61,6 +61,14 @@ tagToTagNew t = TagNew
     _tagnClientId = (_tagClientId t)
   , _tagnName = (_tagName t)
   , _tagColourCode = (_tagColourCode t)
+  }
+
+tagToTagNewDelta :: Tag -> TagNewDelta
+tagToTagNewDelta d = TagNewDelta
+  {
+    _tagnName = _tagName d
+  , _tagnColourCode = _tagColourCode d
+  , _tagnCreatedAt = _tagCreatedat d
   }
   
 tagNewToTag :: TagNew -> TagNewDelta -> Tag
