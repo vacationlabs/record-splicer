@@ -9,9 +9,9 @@ import RecordSplices
 main :: IO ()
 main = someFunc
 
-data TagPoly clientId name colourCode createdAt updatedAt =
+data TagPoly tagId clientId name colourCode createdAt updatedAt =
   TagPoly {
-             _tagId :: Int
+             _tagId :: tagId
            , _tagClientId :: clientId
            , _tagName :: name
            , _tagColourCode :: colourCode
@@ -19,7 +19,7 @@ data TagPoly clientId name colourCode createdAt updatedAt =
            , _tagUpdatedAt :: updatedAt
           } deriving (Eq, Show)
 
-type Tag = TagPoly Integer String String Int String
+type Tag = TagPoly Int Integer String String Int String
 
 createRecordSplice SpliceArgs
   {
@@ -29,5 +29,11 @@ createRecordSplice SpliceArgs
   ,  targetName = "TagNew"
   ,  targetPrefix = "_tagn"
   ,  generateClassyLenses = True
-  ,  deriveClasses = []
+  ,  deriveClasses = [''Eq, ''Show]
   }
+
+
+--------------------------------------------------------------
+-- The following property should hold                       --
+-- tagNewToTag (tagToTagNew tp) (tagToTagNewDelta tp) == tp --
+--------------------------------------------------------------
