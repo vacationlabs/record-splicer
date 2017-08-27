@@ -39,7 +39,7 @@ createRecordSplice args@SpliceArgs{..} = do
           -- in the type synonym
           assocListNamesTyVars =  getTypeVars paramVars (drop 1 paramTypes)
 
-          (targetFields, deltaFields) = generateTargetFields' args assocListNamesTyVars fields
+          (targetFields, deltaFields) = generateTargetFields args assocListNamesTyVars fields
 
       return
         [
@@ -59,6 +59,19 @@ createRecordSplice args@SpliceArgs{..} = do
                         getRecConE targetFields (targetToSourceName args) id fptName ++
                         getRecConE deltaFields (targetToSourceName args) id fpdName) []]
         ]
+    TyConI (DataD ctx name tyVars kind [RecC _ fields] classes) -> do
+      let (targetFields, deltaFields) = generateTargetFields args [] fields
+          paramVars = map transformTyVars tyVars
+
+      return
+        [
+          DataD ctx tName paramVars kind [RecC tName targetFields] classes
+        , DataD ctx dName paramVars kind [RecC dName deltaFields] classes
+        , SigD fsName (AppT (AppT ArrowT (foldl1 AppT (ConT source :  (map (\(PlainTV x) -> (VarT x)) paramVars)))) (foldl1 AppT (ConT tName : (map (\(PlainTV x) -> (VarT x)) paramVars))))
+        , FunD fsName [Clause [VarP fptName]
+                           (NormalB $ RecConE tName $
+                            getRecConE targetFields id (targetToSourceName args) fptName) []]
+        ]
   where
     tName = mkName targetName
     dName = mkName $ targetName ++ "Delta"
@@ -72,6 +85,9 @@ createRecordSplice args@SpliceArgs{..} = do
     getRecConE [] _ _ _ = []
     getRecConE ((tFieldName, _, _) : vbts) f g n =
       (f tFieldName, AppE (VarE $ g tFieldName) (VarE n)) : getRecConE vbts f g n
+
+    transformTyVars :: TyVarBndr -> TyVarBndr
+    transformTyVars (KindedTV name kind) = (PlainTV ((mkName . nameBase) name))
 
 sourceToTargetName :: SpliceArgs -> Name -> Name
 sourceToTargetName SpliceArgs{..} name =
@@ -90,12 +106,13 @@ getFieldType :: [(TyVarBndr, Type)] -> Type -> Type
 getFieldType ((KindedTV n1 kind, t1) : xs) t2@(VarT n2) | n1 == n2 = t1
                                                         | otherwise = getFieldType xs t2
 getFieldType _ t@(ConT n2) = t
+getFieldType _ t@ (VarT n2) = VarT ((mkName . nameBase)n2)
 
 getTypeVars :: [TyVarBndr] -> [Type] -> [(TyVarBndr, Type)]
 getTypeVars = zip
 
-generateTargetFields' :: SpliceArgs -> [(TyVarBndr, Type)] -> [VarBangType] -> ([VarBangType], [VarBangType])
-generateTargetFields' args assocList = gen' reqFields
+generateTargetFields :: SpliceArgs -> [(TyVarBndr, Type)] -> [VarBangType] -> ([VarBangType], [VarBangType])
+generateTargetFields args assocList = gen' reqFields
   where
     -- This function could probably be much succint
     gen' :: [Name] -> [VarBangType] -> ([VarBangType],[VarBangType])

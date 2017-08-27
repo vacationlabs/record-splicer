@@ -32,7 +32,21 @@ createRecordSplice SpliceArgs
   ,  deriveClasses = [''Eq, ''Show]
   }
 
+data Validate = Validated | UnValidated
 
+data T a = T { _t :: a, _g :: String, _h :: Integer } deriving (Show, Eq)
+type TI = T Validate
+
+createRecordSplice SpliceArgs
+  {
+    sourcePrefix = "_"
+  , source = ''T
+  , requiredFields = ['_t, '_h]
+  , targetName = "TINew"
+  , targetPrefix = "_n"
+  , generateClassyLenses = True
+  , deriveClasses = [''Eq, ''Show]
+  }
 --------------------------------------------------------------
 -- The following property should hold                       --
 -- tagNewToTag (tagToTagNew tp) (tagToTagNewDelta tp) == tp --
