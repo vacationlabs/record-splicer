@@ -3,11 +3,7 @@
 module Main where
 
 import Language.Haskell.TH
-import Lib
 import RecordSplicer
-
-main :: IO ()
-main = someFunc
 
 data TagPoly tagId clientId name colourCode createdAt updatedAt =
   TagPoly {
@@ -50,4 +46,10 @@ createRecordSplice SpliceArgs
 --------------------------------------------------------------
 -- The following property should hold                       --
 -- tagNewToTag (tagToTagNew tp) (tagToTagNewDelta tp) == tp --
---------------------------------------------------------------
+-------------------------------------------------------------- main :: IO ()
+
+tp :: Tag
+tp = TagPoly 3 4 "a" "b" 5 "c"
+
+main :: IO ()
+main = putStrLn $ show $ tagNewToTag (tagToTagNew tp) (tagToTagNewDelta tp) == tp
