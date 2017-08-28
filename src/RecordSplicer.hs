@@ -39,7 +39,7 @@ createRecordSplice args@SpliceArgs{..} = do
 
       return $ constructDeclarations ctx name tyVars kind fields assocListNamesTyVars
 
-    TyConI (DataD ctx name tyVars kind [RecC _ fields] classes) -> do
+    TyConI (DataD ctx name tyVars kind [RecC _ fields] classes) ->
       return $ constructDeclarations ctx name tyVars kind fields []
   where
     tName = mkName targetName
@@ -56,7 +56,7 @@ createRecordSplice args@SpliceArgs{..} = do
       (f tFieldName, AppE (VarE $ g tFieldName) (VarE n)) : getRecConE vbts f g n
 
     transformTyVars :: TyVarBndr -> TyVarBndr
-    transformTyVars (KindedTV name kind) = (PlainTV ((mkName . nameBase) name))
+    transformTyVars (KindedTV name kind) = PlainTV ((mkName . nameBase) name)
 
     kindedTyVarsToTypes :: [TyVarBndr] -> [Type]
     kindedTyVarsToTypes ((KindedTV n _):tvbs) = (VarT $ mkName . nameBase $ n) : kindedTyVarsToTypes tvbs
@@ -64,7 +64,7 @@ createRecordSplice args@SpliceArgs{..} = do
     kindedTyVarsToTypes _ = []
 
     makePlainTyVars :: Name -> TyVarBndr
-    makePlainTyVars n = PlainTV n
+    makePlainTyVars = PlainTV
 
     getTyVars :: [VarBangType] -> [Name]
     getTyVars [] = []
@@ -104,8 +104,8 @@ createRecordSplice args@SpliceArgs{..} = do
       where
          phantomTyVars = getPhantomTyVars tyVars $ getTyVars fields
          (targetFields, deltaFields) = generateTargetFields args assocList fields
-         targetParamVars = (map makePlainTyVars $ getTyVars targetFields) ++ map makePlainTyVars phantomTyVars
-         deltaParamVars = (map makePlainTyVars $ getTyVars deltaFields) ++ map makePlainTyVars phantomTyVars
+         targetParamVars = map makePlainTyVars (getTyVars targetFields) ++ map makePlainTyVars phantomTyVars
+         deltaParamVars = map makePlainTyVars (getTyVars deltaFields) ++ map makePlainTyVars phantomTyVars
 
 sourceToTargetName :: SpliceArgs -> Name -> Name
 sourceToTargetName SpliceArgs{..} name =
