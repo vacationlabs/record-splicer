@@ -1,7 +1,7 @@
 name:                record-splicer
 version:             0.1.0.0
--- synopsis:
--- description:
+synopsis:            A library to splice record data types in Haskell
+description:         Generates smaller data types from larger data types in Haskell using Template Haskell. Also generates a few helper functions to interconvert between them.
 homepage:            https://github.com/vacationlabs/record-splicer#readme
 license:             MIT
 license-file:        LICENSE
@@ -17,6 +17,7 @@ library
   hs-source-dirs:      src
   exposed-modules:     RecordSplicer
   build-depends:       base >= 4.7 && < 5
+                     , lens
                      , template-haskell >= 2.12.0.0
   default-language:    Haskell2010
 
