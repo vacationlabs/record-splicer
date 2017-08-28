@@ -25,53 +25,22 @@ createRecordSplice args@SpliceArgs{..} = do
     TyConI (TySynD name tyVars ty) -> do
       let paramTypes = getTypes ty
           -- List of types used in the type synonym, with the data type as the first parameter
-
       -- The data type info of the type synonym
       dataInfo <- reify $ case head paramTypes of
                             ConT d -> d
-
       -- The type variables in the data type
-      let (ctx, name, paramVars, kind, fields, classes) =
+      let (ctx, name, tVars, kind, fields, classes) =
             case dataInfo of
                 TyConI (DataD ctx name tVars kind [RecC _ fields] classes) ->
                   (ctx, name, tVars, kind, fields, classes)
           -- An associative list of the type variables in data types and the exact types
           -- in the type synonym
-          assocListNamesTyVars =  getTypeVars paramVars (drop 1 paramTypes)
+          assocListNamesTyVars =  getTypeVars tVars (drop 1 paramTypes)
 
-          (targetFields, deltaFields) = generateTargetFields args assocListNamesTyVars fields
+      return $ constructDeclarations ctx name tyVars kind fields assocListNamesTyVars
 
-      return
-        [
-          DataD ctx tName [] kind [RecC tName targetFields] [DerivClause Nothing $ map ConT deriveClasses]
-        , DataD ctx dName [] kind [RecC dName deltaFields] [DerivClause Nothing $ map ConT deriveClasses]
-        , SigD fsName (AppT (AppT ArrowT (ConT source)) (ConT tName))
-        , FunD fsName [Clause [VarP fptName]
-                       (NormalB $ RecConE tName $
-                        getRecConE targetFields id (targetToSourceName args) fptName) []]
-        , SigD fdName (AppT (AppT ArrowT (ConT source)) (ConT dName))
-        , FunD fdName [Clause [VarP fpdName]
-                       (NormalB $ RecConE dName $
-                        getRecConE deltaFields id (targetToSourceName args ) fpdName) []]
-        , SigD fmName (AppT (AppT ArrowT (ConT tName)) (AppT (AppT ArrowT (ConT dName)) (ConT source)))
-        , FunD fmName [Clause [VarP fptName, VarP fpdName]
-                        (NormalB $ RecConE ((mkName . nameBase) name) $
-                        getRecConE targetFields (targetToSourceName args) id fptName ++
-                        getRecConE deltaFields (targetToSourceName args) id fpdName) []]
-        ]
     TyConI (DataD ctx name tyVars kind [RecC _ fields] classes) -> do
-      let (targetFields, deltaFields) = generateTargetFields args [] fields
-          paramVars = map transformTyVars tyVars
-
-      return
-        [
-          DataD ctx tName paramVars kind [RecC tName targetFields] classes
-        , DataD ctx dName paramVars kind [RecC dName deltaFields] classes
-        , SigD fsName (AppT (AppT ArrowT (foldl1 AppT (ConT source :  (map (\(PlainTV x) -> (VarT x)) paramVars)))) (foldl1 AppT (ConT tName : (map (\(PlainTV x) -> (VarT x)) paramVars))))
-        , FunD fsName [Clause [VarP fptName]
-                           (NormalB $ RecConE tName $
-                            getRecConE targetFields id (targetToSourceName args) fptName) []]
-        ]
+      return $ constructDeclarations ctx name tyVars kind fields []
   where
     tName = mkName targetName
     dName = mkName $ targetName ++ "Delta"
@@ -89,6 +58,55 @@ createRecordSplice args@SpliceArgs{..} = do
     transformTyVars :: TyVarBndr -> TyVarBndr
     transformTyVars (KindedTV name kind) = (PlainTV ((mkName . nameBase) name))
 
+    kindedTyVarsToTypes :: [TyVarBndr] -> [Type]
+    kindedTyVarsToTypes ((KindedTV n _):tvbs) = (VarT $ mkName . nameBase $ n) : kindedTyVarsToTypes tvbs
+    kindedTyVarsToTypes ((PlainTV n):tvbs) = (VarT $ mkName . nameBase $ n) : kindedTyVarsToTypes tvbs
+    kindedTyVarsToTypes _ = []
+
+    makePlainTyVars :: Name -> TyVarBndr
+    makePlainTyVars n = PlainTV n
+
+    getTyVars :: [VarBangType] -> [Name]
+    getTyVars [] = []
+    getTyVars ((_,_,VarT n) : vbts) = n : getTyVars vbts
+    getTyVars (_:vbts) = getTyVars vbts
+
+    getPhantomTyVars :: [TyVarBndr] -> [Name] -> [Name]
+    getPhantomTyVars ((KindedTV name _) : tvbs) names = ifte name names getPhantomTyVars tvbs
+    getPhantomTyVars ((PlainTV name) : tvbs) names = ifte name names getPhantomTyVars tvbs
+    getPhantomTyVars _ _ = []
+
+    ifte n ns f tvbs = if n `elem` ns
+                       then f tvbs ns
+                       else (mkName . nameBase $ n) : f tvbs ns
+
+    createTySigD :: Name -> [Type] -> Type
+    createTySigD h types= foldl1 AppT $ ConT h : types
+
+    constructDeclarations ctx name tyVars kind fields assocList =
+      [
+        DataD ctx tName targetParamVars kind [RecC tName targetFields] [DerivClause Nothing $ map ConT deriveClasses]
+      , DataD ctx dName deltaParamVars kind [RecC dName deltaFields] [DerivClause Nothing $ map ConT deriveClasses]
+      , SigD fsName (AppT (AppT ArrowT (createTySigD source $ kindedTyVarsToTypes tyVars)) (createTySigD tName $ kindedTyVarsToTypes targetParamVars))
+      , FunD fsName [Clause [VarP fptName]
+                     (NormalB $ RecConE tName $
+                      getRecConE targetFields id (targetToSourceName args) fptName) []]
+      , SigD fdName (AppT (AppT ArrowT (createTySigD source $ kindedTyVarsToTypes tyVars)) (createTySigD dName $ kindedTyVarsToTypes deltaParamVars))
+      , FunD fdName [Clause [VarP fpdName]
+                     (NormalB $ RecConE dName $
+                      getRecConE deltaFields id (targetToSourceName args ) fpdName) []]
+      , SigD fmName (AppT (AppT ArrowT (createTySigD tName $ kindedTyVarsToTypes targetParamVars)) (AppT (AppT ArrowT (createTySigD dName $ kindedTyVarsToTypes deltaParamVars)) (createTySigD source $ kindedTyVarsToTypes tyVars)))
+      , FunD fmName [Clause [VarP fptName, VarP fpdName]
+                      (NormalB $ RecConE ((mkName . nameBase) name) $
+                      getRecConE targetFields (targetToSourceName args) id fptName ++
+                      getRecConE deltaFields (targetToSourceName args) id fpdName) []]
+      ]
+      where
+         phantomTyVars = getPhantomTyVars tyVars $ getTyVars fields
+         (targetFields, deltaFields) = generateTargetFields args assocList fields
+         targetParamVars = (map makePlainTyVars $ getTyVars targetFields) ++ map makePlainTyVars phantomTyVars
+         deltaParamVars = (map makePlainTyVars $ getTyVars deltaFields) ++ map makePlainTyVars phantomTyVars
+
 sourceToTargetName :: SpliceArgs -> Name -> Name
 sourceToTargetName SpliceArgs{..} name =
   mkName $ targetPrefix ++ drop (length sourcePrefix) (nameBase name)
@@ -101,6 +119,7 @@ getTypes :: Type -> [Type]
 -- getTypes (AppT (ConT cons) (ConT var)) = [var]
 getTypes (AppT x y) = getTypes x ++ getTypes y
 getTypes t@(ConT name) = [t]
+getTypes t@(VarT name) = [VarT ((mkName . nameBase) name)]
 
 getFieldType :: [(TyVarBndr, Type)] -> Type -> Type
 getFieldType ((KindedTV n1 kind, t1) : xs) t2@(VarT n2) | n1 == n2 = t1
