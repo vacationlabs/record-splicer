@@ -17,6 +17,7 @@ library
   hs-source-dirs:      src
   exposed-modules:     RecordSplicer
   build-depends:       base >= 4.7 && < 5
+                     , lens
                      , template-haskell
   default-language:    Haskell2010
 
