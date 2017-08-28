@@ -2,6 +2,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 module Main where
 
+import Control.Lens.TH
 import Language.Haskell.TH
 import RecordSplicer
 
@@ -28,10 +29,10 @@ createRecordSplice SpliceArgs
   ,  deriveClasses = [''Eq, ''Show]
   }
 
-data Validate = Validated | UnValidated
+data Validated
+data UnValidated
 
-data T a = T { _t :: a, _g :: String, _h :: Integer } deriving (Show, Eq)
-type TI = T Validate
+data T a b = T { _t :: Int, _g :: b, _h :: Integer } deriving (Show, Eq)
 
 createRecordSplice SpliceArgs
   {
@@ -46,10 +47,15 @@ createRecordSplice SpliceArgs
 --------------------------------------------------------------
 -- The following property should hold                       --
 -- tagNewToTag (tagToTagNew tp) (tagToTagNewDelta tp) == tp --
--------------------------------------------------------------- main :: IO ()
+--------------------------------------------------------------
 
-tp :: Tag
-tp = TagPoly 3 4 "a" "b" 5 "c"
+ts :: Tag
+ts = TagPoly 3 4 "a" "b" 5 "c"
+
+dt :: T Validated Int
+dt = T 3 4 5
 
 main :: IO ()
-main = putStrLn $ show $ tagNewToTag (tagToTagNew tp) (tagToTagNewDelta tp) == tp
+main = do
+  putStrLn $ show $ tagNewToTag (tagToTagNew ts) (tagToTagNewDelta ts) == ts
+  putStrLn $ show $ tINewToT (tToTINew dt) (tToTINewDelta dt) == dt
