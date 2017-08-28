@@ -85,8 +85,8 @@ createRecordSplice args@SpliceArgs{..} = do
 
     constructDeclarations ctx name tyVars kind fields assocList =
       [
-        DataD ctx tName targetParamVars kind [RecC tName targetFields] [DerivClause Nothing $ map ConT deriveClasses]
-      , DataD ctx dName deltaParamVars kind [RecC dName deltaFields] [DerivClause Nothing $ map ConT deriveClasses]
+        DataD ctx tName targetParamVars kind [RecC tName targetFields] (map ConT deriveClasses)
+      , DataD ctx dName deltaParamVars kind [RecC dName deltaFields] (map ConT deriveClasses)
       , SigD fsName (AppT (AppT ArrowT (createTySigD source $ kindedTyVarsToTypes tyVars)) (createTySigD tName $ kindedTyVarsToTypes targetParamVars))
       , FunD fsName [Clause [VarP fptName]
                      (NormalB $ RecConE tName $
