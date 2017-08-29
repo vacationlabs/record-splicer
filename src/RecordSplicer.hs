@@ -17,7 +17,6 @@ data SpliceArgs = SpliceArgs
      ,  requiredFields :: [Name]
      ,  targetName :: String
      ,  targetPrefix :: String
-     ,  generateClassyLenses :: Bool
      ,  deriveClasses :: [Name]
      }
 
@@ -120,11 +119,11 @@ createRecordSplice args@SpliceArgs{..} = do
       , InstanceD Nothing [] (AppT (AppT (ConT hasSpliceClass) (createTySigD source $ kindedTyVarsToTypes tyVars)) (createTySigD tName $ kindedTyVarsToTypes targetParamVars)) [
         FunD fpatch [Clause [VarP fVariable, VarP tVariable]
                      (NormalB $ AppE (AppE (VarE ffmap) (LamE [VarP dVariable] (RecUpdE (VarE tVariable) $ getRecConE targetFields (targetToSourceName args) id dVariable)))
-                      (AppE (VarE fVariable) (AppE (LamE [VarP dVariable] (RecConE tName $ getRecConE targetFields id (targetToSourceName args) tVariable)) (VarE tVariable)))) []]]
+                      (AppE (VarE fVariable) (RecConE tName $ getRecConE targetFields id (targetToSourceName args) tVariable))) []]]
       , InstanceD Nothing [] (AppT (AppT (ConT hasSpliceClass) (createTySigD source $ kindedTyVarsToTypes tyVars)) (createTySigD dName $ kindedTyVarsToTypes deltaParamVars)) [
         FunD fpatch [Clause [VarP fVariable, VarP tVariable]
                      (NormalB $ AppE (AppE (VarE ffmap) (LamE [VarP dVariable] (RecUpdE (VarE tVariable) $ getRecConE deltaFields (targetToSourceName args) id dVariable)))
-                      (AppE (VarE fVariable) (AppE (LamE [VarP dVariable] (RecConE dName $ getRecConE deltaFields id (targetToSourceName args) tVariable)) (VarE tVariable)))) []]]
+                      (AppE (VarE fVariable) (RecConE dName $ getRecConE deltaFields id (targetToSourceName args) tVariable))) []]]
       , InstanceD Nothing [] (AppT (AppT (AppT (ConT isMergeableClass) (createTySigD tName $ kindedTyVarsToTypes targetParamVars))
                                     (createTySigD dName $ kindedTyVarsToTypes deltaParamVars)) (createTySigD source $ kindedTyVarsToTypes tyVars)) [
         FunD fmerge [Clause [VarP tVariable, VarP dVariable]

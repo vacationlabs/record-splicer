@@ -32,7 +32,6 @@ createRecordSplice SpliceArgs
   ,  requiredFields = ['_tagId, '_tagClientId, '_tagUpdatedAt]
   ,  targetName = "TagNew"
   ,  targetPrefix = "_tagn"
-  ,  generateClassyLenses = True
   ,  deriveClasses = [''Eq, ''Show]
   }
 
@@ -50,7 +49,6 @@ createRecordSplice SpliceArgs
   , requiredFields = ['_t, '_h]
   , targetName = "TINew"
   , targetPrefix = "_n"
-  , generateClassyLenses = True
   , deriveClasses = [''Eq, ''Show]
   }
 --------------------------------------------------------------
