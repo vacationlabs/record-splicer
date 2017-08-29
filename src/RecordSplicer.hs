@@ -1,7 +1,11 @@
+{-# LANGUAGE FunctionalDependencies #-}
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE RecordWildCards #-}
-module RecordSplicer (SpliceArgs(..), createRecordSplice) where
+module RecordSplicer (SpliceArgs(..), createRecordSplice, HasSplice(..), IsMergeable(..)) where
 
 import Control.Monad
+import Control.Lens
 import Data.Char (toUpper, toLower)
 import Language.Haskell.TH
 import Language.Haskell.TH.Syntax
@@ -16,6 +20,12 @@ data SpliceArgs = SpliceArgs
      ,  generateClassyLenses :: Bool
      ,  deriveClasses :: [Name]
      }
+
+class HasSplice a b where
+  patch :: Lens' a b
+
+class IsMergeable a b c | a b -> c where
+  merge :: a -> b -> c
 
 createRecordSplice :: SpliceArgs -> Q [Dec]
 createRecordSplice args@SpliceArgs{..} = do
@@ -47,8 +57,14 @@ createRecordSplice args@SpliceArgs{..} = do
     fsName = mkName $ (firstChar toLower . nameBase) source ++ "To" ++ targetName
     fdName = mkName $ (firstChar toLower . nameBase) source ++ "To" ++ nameBase dName
     fmName = mkName $ firstChar toLower targetName ++ "To" ++ nameBase source
-    fptName = mkName "t"
-    fpdName = mkName "d"
+    tVariable = mkName "t"
+    dVariable = mkName "d"
+    fVariable = mkName "f"
+    ffmap = mkName "fmap"
+    hasSpliceClass = mkName "HasSplice"
+    isMergeableClass = mkName "IsMergeable"
+    fpatch = mkName "patch"
+    fmerge = mkName "merge"
 
     getRecConE :: [VarBangType] -> (Name -> Name) -> (Name -> Name) -> Name -> [(Name, Exp)]
     getRecConE [] _ _ _ = []
@@ -78,7 +94,7 @@ createRecordSplice args@SpliceArgs{..} = do
 
     ifte n ns f tvbs = if n `elem` ns
                        then f tvbs ns
-                       else (mkName . nameBase $ n) : f tvbs ns
+                       else n : f tvbs ns
 
     createTySigD :: Name -> [Type] -> Type
     createTySigD h types= foldl1 AppT $ ConT h : types
@@ -88,18 +104,33 @@ createRecordSplice args@SpliceArgs{..} = do
         DataD ctx tName targetParamVars kind [RecC tName targetFields] (map ConT deriveClasses)
       , DataD ctx dName deltaParamVars kind [RecC dName deltaFields] (map ConT deriveClasses)
       , SigD fsName (AppT (AppT ArrowT (createTySigD source $ kindedTyVarsToTypes tyVars)) (createTySigD tName $ kindedTyVarsToTypes targetParamVars))
-      , FunD fsName [Clause [VarP fptName]
+      , FunD fsName [Clause [VarP tVariable]
                      (NormalB $ RecConE tName $
-                      getRecConE targetFields id (targetToSourceName args) fptName) []]
+                      getRecConE targetFields id (targetToSourceName args) tVariable) []]
       , SigD fdName (AppT (AppT ArrowT (createTySigD source $ kindedTyVarsToTypes tyVars)) (createTySigD dName $ kindedTyVarsToTypes deltaParamVars))
-      , FunD fdName [Clause [VarP fpdName]
+      , FunD fdName [Clause [VarP dVariable]
                      (NormalB $ RecConE dName $
-                      getRecConE deltaFields id (targetToSourceName args ) fpdName) []]
-      , SigD fmName (AppT (AppT ArrowT (createTySigD tName $ kindedTyVarsToTypes targetParamVars)) (AppT (AppT ArrowT (createTySigD dName $ kindedTyVarsToTypes deltaParamVars)) (createTySigD source $ kindedTyVarsToTypes tyVars)))
-      , FunD fmName [Clause [VarP fptName, VarP fpdName]
+                      getRecConE deltaFields id (targetToSourceName args ) dVariable) []]
+      , SigD fmName (AppT (AppT ArrowT (createTySigD tName $ kindedTyVarsToTypes targetParamVars))
+                     (AppT (AppT ArrowT (createTySigD dName $ kindedTyVarsToTypes deltaParamVars)) (createTySigD source $ kindedTyVarsToTypes tyVars)))
+      , FunD fmName [Clause [VarP tVariable, VarP dVariable]
                       (NormalB $ RecConE ((mkName . nameBase) name) $
-                      getRecConE targetFields (targetToSourceName args) id fptName ++
-                      getRecConE deltaFields (targetToSourceName args) id fpdName) []]
+                      getRecConE targetFields (targetToSourceName args) id tVariable ++
+                      getRecConE deltaFields (targetToSourceName args) id dVariable) []]
+      , InstanceD Nothing [] (AppT (AppT (ConT hasSpliceClass) (createTySigD source $ kindedTyVarsToTypes tyVars)) (createTySigD tName $ kindedTyVarsToTypes targetParamVars)) [
+        FunD fpatch [Clause [VarP fVariable, VarP tVariable]
+                     (NormalB $ AppE (AppE (VarE ffmap) (LamE [VarP dVariable] (RecUpdE (VarE tVariable) $ getRecConE targetFields (targetToSourceName args) id dVariable)))
+                      (AppE (VarE fVariable) (AppE (LamE [VarP dVariable] (RecConE tName $ getRecConE targetFields id (targetToSourceName args) tVariable)) (VarE tVariable)))) []]]
+      , InstanceD Nothing [] (AppT (AppT (ConT hasSpliceClass) (createTySigD source $ kindedTyVarsToTypes tyVars)) (createTySigD dName $ kindedTyVarsToTypes deltaParamVars)) [
+        FunD fpatch [Clause [VarP fVariable, VarP tVariable]
+                     (NormalB $ AppE (AppE (VarE ffmap) (LamE [VarP dVariable] (RecUpdE (VarE tVariable) $ getRecConE deltaFields (targetToSourceName args) id dVariable)))
+                      (AppE (VarE fVariable) (AppE (LamE [VarP dVariable] (RecConE dName $ getRecConE deltaFields id (targetToSourceName args) tVariable)) (VarE tVariable)))) []]]
+      , InstanceD Nothing [] (AppT (AppT (AppT (ConT isMergeableClass) (createTySigD tName $ kindedTyVarsToTypes targetParamVars))
+                                    (createTySigD dName $ kindedTyVarsToTypes deltaParamVars)) (createTySigD source $ kindedTyVarsToTypes tyVars)) [
+        FunD fmerge [Clause [VarP tVariable, VarP dVariable]
+                                (NormalB $ RecConE ((mkName . nameBase) name) $
+                                getRecConE targetFields (targetToSourceName args) id tVariable ++
+                                getRecConE deltaFields (targetToSourceName args) id dVariable) []]]
       ]
       where
          phantomTyVars = getPhantomTyVars tyVars $ getTyVars fields
@@ -117,15 +148,17 @@ targetToSourceName SpliceArgs{..} name =
 
 getTypes :: Type -> [Type]
 -- getTypes (AppT (ConT cons) (ConT var)) = [var]
+getTypes (AppT x t@(AppT y z)) = getTypes x ++ [t]
 getTypes (AppT x y) = getTypes x ++ getTypes y
 getTypes t@(ConT name) = [t]
-getTypes t@(VarT name) = [VarT ((mkName . nameBase) name)]
+getTypes t@(VarT name) = [t]
 
 getFieldType :: [(TyVarBndr, Type)] -> Type -> Type
 getFieldType ((KindedTV n1 kind, t1) : xs) t2@(VarT n2) | n1 == n2 = t1
                                                         | otherwise = getFieldType xs t2
 getFieldType _ t@(ConT n2) = t
-getFieldType _ t@ (VarT n2) = VarT ((mkName . nameBase)n2)
+getFieldType _ t@(VarT n2) = t --VarT ((mkName . nameBase)n2)
+getFieldType _ t@(AppT x y) = t
 
 getTypeVars :: [TyVarBndr] -> [Type] -> [(TyVarBndr, Type)]
 getTypeVars = zip
