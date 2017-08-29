@@ -1,8 +1,14 @@
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE TypeSynonymInstances #-}
 {-# OPTIONS_GHC -ddump-splices #-}
 {-# LANGUAGE TemplateHaskell #-}
 module Main where
 
+import Control.Lens
 import Control.Lens.TH
+import Control.Lens.Type
+import Control.Lens.Internal
 import Language.Haskell.TH
 import RecordSplicer
 
@@ -16,7 +22,8 @@ data TagPoly tagId clientId name colourCode createdAt updatedAt =
            , _tagUpdatedAt :: updatedAt
           } deriving (Eq, Show)
 
-type Tag = TagPoly Int Integer String String Int String
+type Tag = TagPoly (Either String Int) (Maybe Integer) (Maybe String) (Maybe String) (Maybe Int) (Maybe String)
+
 
 createRecordSplice SpliceArgs
   {
@@ -29,10 +36,12 @@ createRecordSplice SpliceArgs
   ,  deriveClasses = [''Eq, ''Show]
   }
 
+-- makeLenses ''TagNew
+
 data Validated
 data UnValidated
 
-data T a b = T { _t :: Int, _g :: b, _h :: Integer } deriving (Show, Eq)
+data T a b = T { _t :: Maybe Int, _g :: b, _h :: Integer } deriving (Show, Eq)
 
 createRecordSplice SpliceArgs
   {
@@ -50,12 +59,12 @@ createRecordSplice SpliceArgs
 --------------------------------------------------------------
 
 ts :: Tag
-ts = TagPoly 3 4 "a" "b" 5 "c"
+ts = TagPoly (Right 3) (Just 4) (Just "a") (Just "b") (Just 5) (Just "c")
 
 dt :: T Validated Int
-dt = T 3 4 5
+dt = T (Just 3) 4 5
 
 main :: IO ()
 main = do
-  putStrLn $ show $ tagNewToTag (tagToTagNew ts) (tagToTagNewDelta ts) == ts
+  putStrLn $ show $ merge (ts ^. patch :: TagNew) (ts ^. patch :: TagNewDelta) == ts
   putStrLn $ show $ tINewToT (tToTINew dt) (tToTINewDelta dt) == dt
