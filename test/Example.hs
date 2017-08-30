@@ -34,8 +34,6 @@ createRecordSplice SpliceArgs
   ,  deriveClasses = [''Eq, ''Show]
   }
 
--- makeLenses ''TagNew
-
 data Validated
 data UnValidated
 
@@ -50,12 +48,13 @@ createRecordSplice SpliceArgs
   , targetPrefix = "_n"
   , deriveClasses = [''Eq, ''Show]
   }
+
 --------------------------------------------------------------
 -- The following property should hold                       --
 -- tagNewToTag (tagToTagNew tp) (tagToTagNewDelta tp) == tp --
 --------------------------------------------------------------
 
-ts :: Tag String Int
+ts :: Tag String Validated
 ts = TagPoly "String" (Just 4) (Just "a") (Just "b") (Just 5) (Just "c")
 
 dt :: T Validated Int
@@ -63,5 +62,5 @@ dt = T (Just 3) 4 5
 
 main :: IO ()
 main = do
-  putStrLn $ show $ merge (ts ^. patch :: TagNew String Int) (ts ^. patch :: TagNewDelta Int) == ts
+  putStrLn $ show $ merge (ts ^. patch :: TagNew String Validated) (ts ^. patch :: TagNewDelta Validated) == ts
   putStrLn $ show $ tINewToT (tToTINew dt) (tToTINewDelta dt) == dt

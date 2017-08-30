@@ -98,4 +98,8 @@ class HasSplice a b where
 ```
 
 `createRecordSplice` can splice regular Polymorphic Record data types and type synonyms of them,
-it can also splice phantomesque data types.
+it can also splice phantomesque data types and their type synonyms.
+
+Splicing a data type with a phantom variable propagates the phantom variable to spliced data
+types, therefore merging can only be done with sub records whose phantom types are the same.
+The [example](https://github.com/vacationlabs/record-splicer/blob/master/test/Example.hs) file in the test folder illustrates these quirks.
