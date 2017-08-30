@@ -22,8 +22,7 @@ data TagPoly tagId clientId name colourCode createdAt updatedAt =
            , _tagUpdatedAt :: updatedAt
           } deriving (Eq, Show)
 
-type Tag = TagPoly (Either String Int) (Maybe Integer) (Maybe String) (Maybe String) (Maybe Int) (Maybe String)
-
+type Tag a b = TagPoly a (Maybe Integer) (Maybe String) (Maybe String) (Maybe Int) (Maybe String)
 
 createRecordSplice SpliceArgs
   {
@@ -56,13 +55,13 @@ createRecordSplice SpliceArgs
 -- tagNewToTag (tagToTagNew tp) (tagToTagNewDelta tp) == tp --
 --------------------------------------------------------------
 
-ts :: Tag
-ts = TagPoly (Right 3) (Just 4) (Just "a") (Just "b") (Just 5) (Just "c")
+ts :: Tag String Int
+ts = TagPoly "String" (Just 4) (Just "a") (Just "b") (Just 5) (Just "c")
 
 dt :: T Validated Int
 dt = T (Just 3) 4 5
 
 main :: IO ()
 main = do
-  putStrLn $ show $ merge (ts ^. patch :: TagNew) (ts ^. patch :: TagNewDelta) == ts
+  putStrLn $ show $ merge (ts ^. patch :: TagNew String Int) (ts ^. patch :: TagNewDelta Int) == ts
   putStrLn $ show $ tINewToT (tToTINew dt) (tToTINewDelta dt) == dt

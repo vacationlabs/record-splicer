@@ -7,6 +7,7 @@ module RecordSplicer (SpliceArgs(..), createRecordSplice, HasSplice(..), IsMerge
 import Control.Monad
 import Control.Lens
 import Data.Char (toUpper, toLower)
+import Debug.Trace
 import Language.Haskell.TH
 import Language.Haskell.TH.Syntax
 
@@ -46,10 +47,10 @@ createRecordSplice args@SpliceArgs{..} = do
           -- in the type synonym
           assocListNamesTyVars =  getTypeVars tVars (drop 1 paramTypes)
 
-      return $ constructDeclarations ctx name tyVars kind fields assocListNamesTyVars
+      return $ constructDeclarations ctx name tyVars kind fields assocListNamesTyVars (drop 1 paramTypes)
 
     TyConI (DataD ctx name tyVars kind [RecC _ fields] classes) ->
-      return $ constructDeclarations ctx name tyVars kind fields []
+      return $ constructDeclarations ctx name tyVars kind fields [] (getTyNamesFromFields fields)
   where
     tName = mkName targetName
     dName = mkName $ targetName ++ "Delta"
@@ -98,7 +99,7 @@ createRecordSplice args@SpliceArgs{..} = do
     createTySigD :: Name -> [Type] -> Type
     createTySigD h types= foldl1 AppT $ ConT h : types
 
-    constructDeclarations ctx name tyVars kind fields assocList =
+    constructDeclarations ctx name tyVars kind fields assocList tVars' =
       [
         DataD ctx tName targetParamVars kind [RecC tName targetFields] (map ConT deriveClasses)
       , DataD ctx dName deltaParamVars kind [RecC dName deltaFields] (map ConT deriveClasses)
@@ -132,7 +133,7 @@ createRecordSplice args@SpliceArgs{..} = do
                                 getRecConE deltaFields (targetToSourceName args) id dVariable) []]]
       ]
       where
-         phantomTyVars = getPhantomTyVars tyVars $ getTyVars fields
+         phantomTyVars =  getPhantomTyVars tyVars $ getNames tVars'
          (targetFields, deltaFields) = generateTargetFields args assocList fields
          targetParamVars = map makePlainTyVars (getTyVars targetFields) ++ map makePlainTyVars phantomTyVars
          deltaParamVars = map makePlainTyVars (getTyVars deltaFields) ++ map makePlainTyVars phantomTyVars
@@ -151,6 +152,20 @@ getTypes (AppT x t@(AppT y z)) = getTypes x ++ [t]
 getTypes (AppT x y) = getTypes x ++ getTypes y
 getTypes t@(ConT name) = [t]
 getTypes t@(VarT name) = [t]
+
+getNameVars :: Type -> [Name]
+getNameVars (VarT n) = [n]
+getNameVars (AppT t1 t2) = getNameVars t1 ++ getNameVars t2
+getNameVars _ = []
+
+getNames :: [Type] -> [Name]
+getNames ts = mconcat $ map getNameVars ts
+
+getTyNamesFromField :: VarBangType -> Type
+getTyNamesFromField (_, _, t) = t
+
+getTyNamesFromFields :: [VarBangType] -> [Type]
+getTyNamesFromFields vbts  = map getTyNamesFromField vbts
 
 getFieldType :: [(TyVarBndr, Type)] -> Type -> Type
 getFieldType ((KindedTV n1 kind, t1) : xs) t2@(VarT n2) | n1 == n2 = t1
