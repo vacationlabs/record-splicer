@@ -2,12 +2,15 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE RecordWildCards #-}
+
+-- TODO : Fix duplicates in requiredFields list
+-- TODO : have an option to generate delta record or not
+
 module RecordSplicer (SpliceArgs(..), createRecordSplice, HasSplice(..), IsMergeable(..)) where
 
 import Control.Monad
 import Control.Lens
 import Data.Char (toUpper, toLower)
-import Debug.Trace
 import Language.Haskell.TH
 import Language.Haskell.TH.Syntax
 
@@ -184,12 +187,19 @@ generateTargetFields args assocList = gen' reqFields
     gen' :: [Name] -> [VarBangType] -> ([VarBangType],[VarBangType])
     gen' _ [] = ([],[])
     gen' reqFields ((v,b,t):vbts) =
-      if v `elem` reqFields
+      if ((mkName . nameBase) v) `elem` reqFields
       then ((sourceToTargetName args v, b, getFieldType assocList t) : fst (gen' reqFields vbts),
              snd $ gen' reqFields vbts)
       else (fst $ gen' reqFields vbts,
             (sourceToTargetName args v, b, getFieldType assocList t) : snd (gen' reqFields vbts))
-    reqFields = requiredFields args
+    reqFields = map getNameFromField $ requiredFields args
+
+getNameFromField :: Name -> Name
+getNameFromField field = if head fieldName == '$'
+                            then mkName $ takeWhile (\c -> c /= ':') (drop 5 fieldName)
+                            else mkName $ fieldName
+  where
+    fieldName = nameBase field
 
 firstChar :: (Char -> Char) -> String -> String
 firstChar f name =  (f . head) name : tail name
