@@ -155,6 +155,8 @@ getTypes (AppT x t@(AppT y z)) = getTypes x ++ [t]
 getTypes (AppT x y) = getTypes x ++ getTypes y
 getTypes t@(ConT name) = [t]
 getTypes t@(VarT name) = [t]
+getTypes t@(TupleT x) = [t]
+getTypes x = error $ "Do not know how to handle type " ++ (show x)
 
 getNameVars :: Type -> [Name]
 getNameVars (VarT n) = [n]
