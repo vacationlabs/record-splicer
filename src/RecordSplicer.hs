@@ -2,6 +2,7 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE DerivingStrategies #-}
 
 -- TODO : Fix duplicates in requiredFields list
 -- TODO : have an option to generate delta record or not
@@ -104,8 +105,8 @@ createRecordSplice args@SpliceArgs{..} = do
 
     constructDeclarations ctx name tyVars kind fields assocList tVars' =
       [
-        DataD ctx tName targetParamVars kind [RecC tName targetFields] (map ConT deriveClasses)
-      , DataD ctx dName deltaParamVars kind [RecC dName deltaFields] (map ConT deriveClasses)
+        DataD ctx tName targetParamVars kind [RecC tName targetFields] [DerivClause (Just StockStrategy) (map ConT deriveClasses)]
+      , DataD ctx dName deltaParamVars kind [RecC dName deltaFields] [DerivClause (Just StockStrategy) (map ConT deriveClasses)]
       , SigD fsName (AppT (AppT ArrowT (createTySigD source $ kindedTyVarsToTypes tyVars)) (createTySigD tName $ kindedTyVarsToTypes targetParamVars))
       , FunD fsName [Clause [VarP tVariable]
                      (NormalB $ RecConE tName $
