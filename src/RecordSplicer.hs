@@ -6,7 +6,7 @@
 -- TODO : Fix duplicates in requiredFields list
 -- TODO : have an option to generate delta record or not
 
-module RecordSplicer (SpliceArgs(..), createRecordSplice, HasSplice(..), IsMergeable(..)) where
+module RecordSplicer (SpliceArgs(..), createRecordSplice, mkExtraField, HasSplice(..), IsMergeable(..)) where
 
 import Control.Monad
 import Control.Lens
@@ -22,7 +22,21 @@ data SpliceArgs = SpliceArgs
      ,  targetName :: String
      ,  targetPrefix :: String
      ,  deriveClasses :: [Name]
+     ,  extraFields :: [Q VarBangType]
+     -- ^ Additional fields to append to the target record that don't come from the source type.
+     -- These fields are NOT included in conversion functions, merge, or HasSplice — they are
+     -- target-only. Use 'mkExtraField' to construct entries.
      }
+
+-- | Helper to construct an extra field entry for 'SpliceArgs'.
+--
+-- @
+--   mkExtraField "_piItems" [t| [ParsedItem] |]
+-- @
+mkExtraField :: String -> Q Type -> Q VarBangType
+mkExtraField fieldName qtyp = do
+  typ <- qtyp
+  pure (mkName fieldName, Bang NoSourceUnpackedness SourceStrict, typ)
 
 class HasSplice a b where
   patch :: Lens' a b
@@ -33,6 +47,7 @@ class IsMergeable a b c | a b -> c where
 createRecordSplice :: SpliceArgs -> Q [Dec]
 createRecordSplice args@SpliceArgs{..} = do
   info <- reify source
+  resolvedExtraFields <- sequence extraFields
 
   case info of
     TyConI (TySynD name tyVars ty) -> do
@@ -50,10 +65,10 @@ createRecordSplice args@SpliceArgs{..} = do
           -- in the type synonym
           assocListNamesTyVars =  getTypeVars tVars (drop 1 paramTypes)
 
-      return $ constructDeclarations ctx name tyVars kind fields assocListNamesTyVars (drop 1 paramTypes)
+      return $ constructDeclarations resolvedExtraFields ctx name tyVars kind fields assocListNamesTyVars (drop 1 paramTypes)
 
     TyConI (DataD ctx name tyVars kind [RecC _ fields] classes) ->
-      return $ constructDeclarations ctx name tyVars kind fields [] (getTyNamesFromFields fields)
+      return $ constructDeclarations resolvedExtraFields ctx name tyVars kind fields [] (getTyNamesFromFields fields)
   where
     tName = mkName targetName
     dName = mkName $ targetName ++ "Delta"
@@ -102,38 +117,47 @@ createRecordSplice args@SpliceArgs{..} = do
     createTySigD :: Name -> [Type] -> Type
     createTySigD h types= foldl1 AppT $ ConT h : types
 
-    constructDeclarations ctx name tyVars kind fields assocList tVars' =
-      [
-        DataD ctx tName targetParamVars kind [RecC tName targetFields] [DerivClause Nothing (map ConT deriveClasses)]
+    constructDeclarations resolvedExtras ctx name tyVars kind fields assocList tVars' =
+      let hasExtras = not $ null resolvedExtras in
+      -- Target and delta data declarations (always generated)
+      [ DataD ctx tName targetParamVars kind [RecC tName (targetFields ++ resolvedExtras)] [DerivClause Nothing (map ConT deriveClasses)]
       , DataD ctx dName deltaParamVars kind [RecC dName deltaFields] [DerivClause Nothing (map ConT deriveClasses)]
-      , SigD fsName (AppT (AppT ArrowT (createTySigD source $ kindedTyVarsToTypes tyVars)) (createTySigD tName $ kindedTyVarsToTypes targetParamVars))
-      , FunD fsName [Clause [VarP tVariable]
-                     (NormalB $ RecConE tName $
-                      getRecConE targetFields id (targetToSourceName args) tVariable) []]
+      -- source → delta (always generated — delta never has extra fields)
       , SigD fdName (AppT (AppT ArrowT (createTySigD source $ kindedTyVarsToTypes tyVars)) (createTySigD dName $ kindedTyVarsToTypes deltaParamVars))
       , FunD fdName [Clause [VarP dVariable]
                      (NormalB $ RecConE dName $
                       getRecConE deltaFields id (targetToSourceName args ) dVariable) []]
+      -- merge: target + delta → source (reads only source-derived fields from target, ignores extras)
       , SigD fmName (AppT (AppT ArrowT (createTySigD tName $ kindedTyVarsToTypes targetParamVars))
                      (AppT (AppT ArrowT (createTySigD dName $ kindedTyVarsToTypes deltaParamVars)) (createTySigD source $ kindedTyVarsToTypes tyVars)))
       , FunD fmName [Clause [VarP tVariable, VarP dVariable]
                       (NormalB $ RecConE ((mkName . nameBase) name) $
                       getRecConE targetFields (targetToSourceName args) id tVariable ++
                       getRecConE deltaFields (targetToSourceName args) id dVariable) []]
-      , InstanceD Nothing [] (AppT (AppT (ConT hasSpliceClass) (createTySigD source $ kindedTyVarsToTypes tyVars)) (createTySigD tName $ kindedTyVarsToTypes targetParamVars)) [
-        FunD fpatch [Clause [VarP fVariable, VarP tVariable]
-                     (NormalB $ AppE (AppE (VarE ffmap) (LamE [VarP dVariable] (RecUpdE (VarE tVariable) $ getRecConE targetFields (targetToSourceName args) id dVariable)))
-                      (AppE (VarE fVariable) (RecConE tName $ getRecConE targetFields id (targetToSourceName args) tVariable))) []]]
+      -- HasSplice source delta (always works — delta has no extras)
       , InstanceD Nothing [] (AppT (AppT (ConT hasSpliceClass) (createTySigD source $ kindedTyVarsToTypes tyVars)) (createTySigD dName $ kindedTyVarsToTypes deltaParamVars)) [
         FunD fpatch [Clause [VarP fVariable, VarP tVariable]
                      (NormalB $ AppE (AppE (VarE ffmap) (LamE [VarP dVariable] (RecUpdE (VarE tVariable) $ getRecConE deltaFields (targetToSourceName args) id dVariable)))
                       (AppE (VarE fVariable) (RecConE dName $ getRecConE deltaFields id (targetToSourceName args) tVariable))) []]]
+      -- IsMergeable (reads only source-derived fields from target)
       , InstanceD Nothing [] (AppT (AppT (AppT (ConT isMergeableClass) (createTySigD tName $ kindedTyVarsToTypes targetParamVars))
                                     (createTySigD dName $ kindedTyVarsToTypes deltaParamVars)) (createTySigD source $ kindedTyVarsToTypes tyVars)) [
         FunD fmerge [Clause [VarP tVariable, VarP dVariable]
                                 (NormalB $ RecConE ((mkName . nameBase) name) $
                                 getRecConE targetFields (targetToSourceName args) id tVariable ++
                                 getRecConE deltaFields (targetToSourceName args) id dVariable) []]]
+      ]
+      -- source → target and HasSplice source target only when no extra fields
+      -- (can't construct target from source alone when target has extra fields)
+      ++ if hasExtras then [] else
+      [ SigD fsName (AppT (AppT ArrowT (createTySigD source $ kindedTyVarsToTypes tyVars)) (createTySigD tName $ kindedTyVarsToTypes targetParamVars))
+      , FunD fsName [Clause [VarP tVariable]
+                     (NormalB $ RecConE tName $
+                      getRecConE targetFields id (targetToSourceName args) tVariable) []]
+      , InstanceD Nothing [] (AppT (AppT (ConT hasSpliceClass) (createTySigD source $ kindedTyVarsToTypes tyVars)) (createTySigD tName $ kindedTyVarsToTypes targetParamVars)) [
+        FunD fpatch [Clause [VarP fVariable, VarP tVariable]
+                     (NormalB $ AppE (AppE (VarE ffmap) (LamE [VarP dVariable] (RecUpdE (VarE tVariable) $ getRecConE targetFields (targetToSourceName args) id dVariable)))
+                      (AppE (VarE fVariable) (RecConE tName $ getRecConE targetFields id (targetToSourceName args) tVariable))) []]]
       ]
       where
          phantomTyVars =  getPhantomTyVars tyVars $ getNames tVars'

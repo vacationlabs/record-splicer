@@ -32,6 +32,7 @@ createRecordSplice SpliceArgs
   ,  targetName = "TagNew"
   ,  targetPrefix = "_tagn"
   ,  deriveClasses = [''Eq, ''Show]
+  ,  extraFields = []
   }
 
 data Validated
@@ -47,6 +48,7 @@ createRecordSplice SpliceArgs
   , targetName = "TINew"
   , targetPrefix = "_n"
   , deriveClasses = [''Eq, ''Show]
+  , extraFields = []
   }
 
 --------------------------------------------------------------
