@@ -25,7 +25,6 @@ test-suite RecordSplicer-test
   type:                exitcode-stdio-1.0
   hs-source-dirs:      test
   main-is:             Example.hs
-  other-modules:       Types
   build-depends:       base
                      , lens
                      , record-splicer

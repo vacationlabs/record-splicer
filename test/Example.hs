@@ -6,9 +6,6 @@
 module Main where
 
 import Control.Lens
-import Control.Lens.TH
-import Control.Lens.Type
-import Control.Lens.Internal
 import Language.Haskell.TH
 import RecordSplicer
 
@@ -32,7 +29,7 @@ createRecordSplice SpliceArgs
   ,  targetName = "TagNew"
   ,  targetPrefix = "_tagn"
   ,  deriveClasses = [''Eq, ''Show]
-  ,  extraFields = []
+  ,  extrasFrom = Nothing
   }
 
 data Validated
@@ -48,12 +45,11 @@ createRecordSplice SpliceArgs
   , targetName = "TINew"
   , targetPrefix = "_n"
   , deriveClasses = [''Eq, ''Show]
-  , extraFields = []
+  , extrasFrom = Nothing
   }
 
 --------------------------------------------------------------
--- The following property should hold                       --
--- tagNewToTag (tagToTagNew tp) (tagToTagNewDelta tp) == tp --
+-- Property: merge (toTarget s) (s ^. targetDelta) == s    --
 --------------------------------------------------------------
 
 ts :: Tag String Validated
@@ -64,5 +60,5 @@ dt = T (Just 3) 4 5
 
 main :: IO ()
 main = do
-  putStrLn $ show $ merge (ts ^. patch :: TagNew String Validated) (ts ^. patch :: TagNewDelta Validated) == ts
-  putStrLn $ show $ tINewToT (tToTINew dt) (tToTINewDelta dt) == dt
+  putStrLn $ show $ merge (tagToTagNew ts :: TagNew String Validated) (ts ^. tagNewDelta :: TagNewDelta Validated) == ts
+  putStrLn $ show $ merge (tToTINew dt) (dt ^. tINewDelta) == dt
