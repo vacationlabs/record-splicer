@@ -4,7 +4,15 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TemplateHaskell #-}
 
-module RecordSplicer (SpliceArgs(..), createRecordSplice, Patch(..), Merge(..)) where
+module RecordSplicer
+  ( SpliceArgs(..), createRecordSplice, Patch(..), Merge(..)
+  -- * Shared record-reflection core (reused by the splicer and the drift gates)
+  , ReifiedRecord(..)
+  , reifyRecord
+  , recordFieldPartition
+  , checkNameSet
+  , getNameFromField
+  ) where
 
 import Control.Monad
 import Control.Lens
@@ -38,8 +46,6 @@ class Merge a b c | a b -> c where
 
 createRecordSplice :: SpliceArgs -> Q [Dec]
 createRecordSplice args@SpliceArgs{..} = do
-  info <- reify source
-
   -- Reify the extras type if provided
   (mExtrasInfo, resolvedExtraFields) <- case extrasFrom of
     Nothing -> pure (Nothing, [])
@@ -55,20 +61,15 @@ createRecordSplice args@SpliceArgs{..} = do
   -- Generate unique local variable names for extras (avoids DuplicateRecordFields ambiguity)
   extraLocalNames <- forM resolvedExtraFields $ \(fn, _, _) -> newName ("ex_" ++ nameBase fn)
 
-  case info of
-    TyConI (TySynD name tyVars ty) -> do
-      let paramTypes = getTypes ty
-      dataInfo <- reify $ case head paramTypes of
-                            ConT d -> d
-      let (ctx, name, tVars, kind, fields, classes) =
-            case dataInfo of
-                TyConI (DataD ctx name tVars kind [RecC _ fields] classes) ->
-                  (ctx, name, tVars, kind, fields, classes)
-          assocListNamesTyVars = getTypeVars tVars (drop 1 paramTypes)
-      return $ constructDeclarations mExtrasInfo resolvedExtraFields extraLocalNames ctx name tyVars kind fields assocListNamesTyVars (drop 1 paramTypes)
-
-    TyConI (DataD ctx name tyVars kind [RecC _ fields] classes) ->
-      return $ constructDeclarations mExtrasInfo resolvedExtraFields extraLocalNames ctx name tyVars kind fields [] (getTyNamesFromFields fields)
+  -- Resolve the source record via the shared reflection core (synonym-aware).
+  -- 'rrHeadTyVars' are the type variables exposed on the generated target/delta:
+  -- the synonym's own (typically none, since a synonym fully applies the data
+  -- constructor) or the data declaration's for a direct record. 'rrSynArgs' are
+  -- the concrete types the synonym applied; empty for a direct data type.
+  ReifiedRecord{..} <- reifyRecord source
+  let assocList = getTypeVars rrDataTyVars rrSynArgs
+      tVars'    = if Prelude.null rrSynArgs then getTyNamesFromFields rrFields else rrSynArgs
+  return $ constructDeclarations mExtrasInfo resolvedExtraFields extraLocalNames rrCtx rrName rrHeadTyVars rrKind rrFields assocList tVars'
   where
     tName = mkName targetName
     dName = mkName $ targetName ++ "Delta"
@@ -228,3 +229,113 @@ getNameFromField field = if head fieldName == '$'
 
 firstChar :: (Char -> Char) -> String -> String
 firstChar f name = (f . head) name : tail name
+
+-- ============================================================
+-- Shared record-reflection core + compile-time drift gates
+--
+-- 'reifyRecord' is the single resolver from a (possibly type-synonym) name down
+-- to its underlying single-record data declaration. Both the splicer
+-- ('createRecordSplice') and the drift gate ('recordFieldPartition') consume it,
+-- each destructuring the fields it needs -- so the synonym-resolution logic lives
+-- in exactly one place.
+-- ============================================================
+
+-- | The resolved shape of a single-constructor record type, with a type-synonym
+-- (e.g. @type Itinerary = ItineraryPoly ...@) followed down to its underlying
+-- data declaration.
+data ReifiedRecord = ReifiedRecord
+  { rrCtx        :: Cxt                -- ^ data declaration context
+  , rrName       :: Name              -- ^ underlying data-type constructor name (e.g. @ItineraryPoly@)
+  , rrDataTyVars :: [TyVarBndr ()]    -- ^ the data declaration's own type variables
+  , rrHeadTyVars :: [TyVarBndr ()]    -- ^ type vars to expose downstream: the synonym's (synonym case) or the data's (direct case)
+  , rrKind       :: Maybe Kind
+  , rrFields     :: [VarBangType]     -- ^ record fields, as declared on the data type
+  , rrDeriv      :: [DerivClause]
+  , rrSynArgs    :: [Type]            -- ^ concrete types the synonym applied; @[]@ for a direct data type
+  }
+
+-- | Resolve @nm@ to its 'ReifiedRecord', following a type synonym to the
+-- underlying record. Fails for non-record / multi-constructor types.
+reifyRecord :: Name -> Q ReifiedRecord
+reifyRecord nm = do
+  info <- reify nm
+  case info of
+    TyConI (TySynD _ synTyVars ty) ->
+      case getTypes ty of
+        (ConT d : appliedArgs) -> do
+          (ctx, name, dataTyVars, kind, fields, classes) <- reifyDataDecl d
+          pure ReifiedRecord
+            { rrCtx = ctx, rrName = name, rrDataTyVars = dataTyVars
+            , rrHeadTyVars = synTyVars, rrKind = kind, rrFields = fields
+            , rrDeriv = classes, rrSynArgs = appliedArgs }
+        _ -> fail $ "reifyRecord: cannot resolve type-synonym head of " ++ nameBase nm
+    TyConI dec -> do
+      (ctx, name, dataTyVars, kind, fields, classes) <- decRecord nm dec
+      pure ReifiedRecord
+        { rrCtx = ctx, rrName = name, rrDataTyVars = dataTyVars
+        , rrHeadTyVars = dataTyVars, rrKind = kind, rrFields = fields
+        , rrDeriv = classes, rrSynArgs = [] }
+    _ -> fail $ "reifyRecord: " ++ nameBase nm ++ " is not a type constructor"
+
+reifyDataDecl :: Name -> Q (Cxt, Name, [TyVarBndr ()], Maybe Kind, [VarBangType], [DerivClause])
+reifyDataDecl d = do
+  info <- reify d
+  case info of
+    TyConI dec -> decRecord d dec
+    _          -> fail $ "reifyRecord: " ++ nameBase d ++ " is not a data type"
+
+decRecord :: Name -> Dec -> Q (Cxt, Name, [TyVarBndr ()], Maybe Kind, [VarBangType], [DerivClause])
+decRecord _  (DataD ctx name tyVars kind [RecC _ fields] classes)    = pure (ctx, name, tyVars, kind, fields, classes)
+decRecord _  (NewtypeD ctx name tyVars kind (RecC _ fields) classes) = pure (ctx, name, tyVars, kind, fields, classes)
+decRecord nm _                                                       = fail $ "reifyRecord: " ++ nameBase nm ++ " is not a single-constructor record type"
+
+-- | Diff a developer-maintained @expected@ name set against the @actual@ names
+-- found on a type by 'reify', failing the build (with @note@) on any drift.
+-- @kind@ ("field" / "constructor") and @tyName@ only shape the error message.
+-- Shared by 'recordFieldPartition' and any constructor-set variant.
+checkNameSet :: String -> String -> [String] -> [String] -> String -> Q ()
+checkNameSet kind tyName expected actual note = do
+  let added   = filter (`notElem` expected) actual   -- on the type, not yet classified
+      removed = filter (`notElem` actual) expected     -- classified, but gone from the type
+  unless (Prelude.null added && Prelude.null removed) $
+    fail $ unlines
+      [ "Compile-time " ++ kind ++ " guard: the " ++ kind ++ " set of " ++ tyName ++ " has drifted."
+      , "  Unclassified (present on the type, missing from your lists): " ++ show added
+      , "  Stale (in your lists, no longer present on the type):        " ++ show removed
+      , "Action required: " ++ note
+      ]
+
+-- | Compile-time guard: every record field of @typeName@ (autogen @*Poly@
+-- synonyms supported) MUST be classified as either kept (@whitelist@) or
+-- dropped (@blacklist@). A newly-added field that appears in neither list fails
+-- the build; a field listed in BOTH fails the build. Emits no declarations.
+--
+-- Fields are passed as 'Name's via TH name-quotes (@'_itineraryName@), which
+-- gives a second, independent check for free: each listed selector must be in
+-- scope, so a typo'd or deleted field is a "not in scope" error at the call-site
+-- before this guard even runs. The 'reify' pass adds the completeness check the
+-- quotes cannot: that every actual field is classified exactly once.
+--
+-- Example:
+--   $(recordFieldPartition ''Itinerary
+--       [ '_itineraryName, '_itineraryOverview {- ...sent downstream... -} ]
+--       [ '_itineraryId, '_itineraryTotalPrice {- ...deliberately withheld... -} ]
+--       "Classify the new itineraries column in Plugin.ItineraryBuilder.LLMFormatters.")
+recordFieldPartition :: Name -> [Name] -> [Name] -> String -> Q [Dec]
+recordFieldPartition typeName whitelist blacklist note = do
+  fields <- rrFields <$> reifyRecord typeName
+  -- 'getNameFromField' normalises the DuplicateRecordFields mangling: a quoted
+  -- selector ''_itineraryName'' reifies with nameBase "$sel:_itineraryName:ItineraryPoly",
+  -- which must be reduced to the bare "_itineraryName" to match the field names.
+  let actual    = map (\(fn, _, _) -> nameBase fn) fields
+      keep      = map (nameBase . getNameFromField) whitelist
+      drop_     = map (nameBase . getNameFromField) blacklist
+      both      = filter (`elem` drop_) keep
+  unless (Prelude.null both) $
+    fail $ unlines
+      [ "recordFieldPartition: field(s) classified as BOTH kept and dropped on " ++ nameBase typeName ++ ":"
+      , "  " ++ show both
+      , "Action required: " ++ note
+      ]
+  checkNameSet "field" (nameBase typeName) (keep ++ drop_) actual note
+  pure []
